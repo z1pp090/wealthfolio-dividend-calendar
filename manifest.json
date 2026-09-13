@@ -1,0 +1,88 @@
+{
+  "id": "dividend-calendar-addon",
+  "name": "Dividend Calendar",
+  "version": "0.1.0",
+  "description": "Upcoming dividends for your holdings: next 12 months by asset and by month, from provider history (projected) and Yahoo calendar events (declared).",
+  "author": "z1pp090",
+  "main": "dist/addon.js",
+  "sdkVersion": "3.8.0",
+  "minWealthfolioVersion": "3.8.0",
+  "enabled": true,
+  "contributes": {
+    "routes": [
+      {
+        "id": "dividend-calendar"
+      }
+    ],
+    "links": {
+      "sidebar": [
+        {
+          "id": "dividend-calendar",
+          "route": "dividend-calendar",
+          "label": "Dividend Calendar",
+          "icon": "calendar-dots",
+          "order": 210
+        }
+      ]
+    }
+  },
+  "network": {
+    "allowedHosts": [
+      "query1.finance.yahoo.com",
+      "query2.finance.yahoo.com"
+    ]
+  },
+  "hostDependencies": {
+    "@tanstack/react-query": "^5.90.0",
+    "@wealthfolio/addon-sdk": "^3.8.0",
+    "@wealthfolio/ui": "^3.8.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "permissions": [
+    {
+      "category": "accounts",
+      "functions": [
+        "getAll"
+      ],
+      "purpose": "List accounts to gather holdings across the whole portfolio"
+    },
+    {
+      "category": "portfolio",
+      "functions": [
+        "getHoldings"
+      ],
+      "purpose": "Read current holdings (symbol, quantity, price, cost) to estimate upcoming payouts"
+    },
+    {
+      "category": "assets",
+      "functions": [
+        "getProfile"
+      ],
+      "purpose": "Read instrument type and ISIN to skip non-equity assets and find the primary listing"
+    },
+    {
+      "category": "market-data",
+      "functions": [
+        "fetchDividends"
+      ],
+      "purpose": "Read each holding's dividend history to infer payment cadence and last amount"
+    },
+    {
+      "category": "network",
+      "functions": [
+        "request"
+      ],
+      "purpose": "Look up the primary (US) listing and its declared dividends on Yahoo Finance (search + chart endpoints)"
+    },
+    {
+      "category": "ui",
+      "functions": [
+        "sidebar.addItem",
+        "router.add",
+        "onDisable"
+      ],
+      "purpose": "Register the Dividend Calendar page in the sidebar"
+    }
+  ]
+}
