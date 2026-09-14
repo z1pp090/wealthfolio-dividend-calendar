@@ -240,7 +240,7 @@ export function CalendarView({ data, hidden }: Props) {
           <ChartContainer config={chartConfig} className="h-64 w-full">
             <BarChart data={chart24} margin={{ left: 4, right: 4, top: 16, bottom: 0 }}>
               <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={11} interval={1} />
+              <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={11} interval="preserveStartEnd" minTickGap={28} />
               <YAxis tickLine={false} axisLine={false} fontSize={11} width={56} tickFormatter={axisMoney} />
               <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.4 }} content={moneyTooltip} />
               <ChartLegend content={<ChartLegendContent />} />
@@ -271,7 +271,7 @@ export function CalendarView({ data, hidden }: Props) {
               <ChartContainer config={{ total: { label: t("cumulative.title"), color: PALETTE[0] } }} className="h-48 w-full">
                 <AreaChart data={cumulativeSeries.map((p) => ({ month: fmtMonth(p.month), total: p.total }))} margin={{ left: 4, right: 4, top: 8, bottom: 0 }}>
                   <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                  <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={11} />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={11} interval="preserveStartEnd" minTickGap={28} />
                   <YAxis tickLine={false} axisLine={false} fontSize={11} width={56} tickFormatter={axisMoney} />
                   <ChartTooltip content={moneyTooltip} />
                   <Area type="monotone" dataKey="total" stroke="var(--color-total)" fill="var(--color-total)" fillOpacity={0.25} />
@@ -297,7 +297,7 @@ export function CalendarView({ data, hidden }: Props) {
             <ChartContainer config={{ monthly: { label: t("longTerm.monthly"), color: PALETTE[1] } }} className="h-40 w-full">
               <LineChart data={longTermPoints} margin={{ left: 4, right: 4, top: 8, bottom: 0 }}>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                <XAxis dataKey="year" tickLine={false} axisLine={false} fontSize={11} />
+                <XAxis dataKey="year" tickLine={false} axisLine={false} fontSize={11} interval="preserveStartEnd" minTickGap={28} />
                 <YAxis tickLine={false} axisLine={false} fontSize={11} width={56} tickFormatter={axisMoney} />
                 <ChartTooltip content={moneyTooltip} />
                 {goal > 0 && (

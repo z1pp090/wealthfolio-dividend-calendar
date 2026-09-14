@@ -8,6 +8,7 @@ import { SettingsPanel } from "./components/settings-panel";
 import { buildCalendar } from "./lib/build-calendar";
 import { translations } from "./lib/i18n";
 import { loadSettings, saveSettings, type CalendarSettings } from "./lib/settings";
+import { useNarrow } from "./lib/use-narrow";
 
 const ROUTE_ID = "dividend-calendar";
 const ROUTE_PATH = "/addons/dividend-calendar-addon";
@@ -41,6 +42,7 @@ function DividendCalendarPage({ ctx }: { ctx: AddonContext }) {
   const { isBalanceHidden } = useBalancePrivacy();
   const queryClient = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const narrow = useNarrow();
 
   const settingsQuery = useQuery({
     queryKey: QK_SETTINGS,
@@ -62,21 +64,28 @@ function DividendCalendarPage({ ctx }: { ctx: AddonContext }) {
     ctx.api.toast.success(t("settingsPanel.saved"));
   };
 
-  const header = (
-    <PageHeader
-      actions={
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} disabled={!data}>
-            <Icons.Settings className="mr-2 h-4 w-4" />
-            {t("settings")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching || !settings}>
-            <Icons.Refresh className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-            {t("refresh")}
-          </Button>
-        </div>
-      }
-    >
+  // On phones the host header is a sticky band: keep it to one line, icon-only buttons.
+  const actions = (
+    <div className="flex gap-2">
+      <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} disabled={!data} aria-label={t("settings")}>
+        <Icons.Settings className={narrow ? "h-4 w-4" : "mr-2 h-4 w-4"} />
+        {!narrow && t("settings")}
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching || !settings} aria-label={t("refresh")}>
+        <Icons.Refresh className={`${narrow ? "" : "mr-2 "}h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+        {!narrow && t("refresh")}
+      </Button>
+    </div>
+  );
+  const header = narrow ? (
+    <PageHeader>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-base font-semibold">{t("title")}</h1>
+        {actions}
+      </div>
+    </PageHeader>
+  ) : (
+    <PageHeader actions={actions}>
       <div className="flex flex-col gap-1">
         <h1 className="text-lg font-semibold sm:text-xl">{t("title")}</h1>
         <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
