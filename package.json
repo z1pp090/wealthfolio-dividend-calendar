@@ -1,7 +1,7 @@
 {
   "name": "dividend-calendar-addon",
-  "version": "0.1.0",
-  "description": "Wealthfolio addon: upcoming dividends for your holdings, projected from history and declared via Yahoo calendar events",
+  "version": "0.2.0",
+  "description": "Wealthfolio addon: upcoming dividends for your holdings, gross and net, projected from history and declared via Yahoo calendar events",
   "type": "module",
   "main": "dist/addon.js",
   "author": "z1pp090",
@@ -25,18 +25,19 @@
     "package": "node scripts/package.mjs",
     "bundle": "pnpm clean && pnpm build && pnpm package",
     "type-check": "tsc --noEmit",
-    "test": "tsc src/lib/projection.ts --outDir dist-test --module es2020 --target es2020 --moduleResolution bundler --lib es2020,dom && node --test tests/"
+    "test": "tsc src/lib/projection.ts src/lib/tax.ts --outDir dist-test --module es2020 --target es2020 --moduleResolution bundler --lib es2020,dom && node --test \"tests/*.test.mjs\""
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5.90.0",
     "@wealthfolio/addon-sdk": "^3.8.0",
     "@wealthfolio/ui": "^3.8.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "recharts": "^3.7.0"
   },
   "devDependencies": {
-    "@tanstack/react-query": "^5.90.20",
     "@tailwindcss/vite": "^4.1.18",
+    "@tanstack/react-query": "^5.90.20",
     "@types/node": "^20.19.33",
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
@@ -46,6 +47,7 @@
     "@wealthfolio/ui": "^3.8.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "recharts": "^3.7.0",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
     "vite": "^7.3.2"

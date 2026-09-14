@@ -2,15 +2,19 @@
  * Glue between the host APIs and the pure projection module.
  *
  * For every equity-type holding across all accounts:
- *   1. history  = api.market.fetchDividends(symbol + MIC, last 24 months)  (host provider)
- *   2. primary  = Yahoo primary (US) listing found by name; its crumb-free `chart?events=div`
- *                 exposes the latest DECLARED dividend (ex-date in the future) weeks earlier
- *                 than the European listing.
- *   3. project(history, { declared })
- *   4. scale per-share amounts by quantity and convert to base currency with the holding fx rate
+ *   1. history  = api.market.fetchDividends(symbol + MIC, last 24 months)  (host provider;
+ *                 event dates are EX-DATES)
+ *   2. primary  = Yahoo primary (US) listing found by ISIN/name; its crumb-free
+ *                 `chart?events=div` exposes the latest DECLARED dividend (ex-date in the
+ *                 future) weeks earlier than the European listing.
+ *   3. project(history, { declared, payLagDays })
+ *   4. scale per-share amounts by quantity, convert to base currency with the holding fx
+ *      rate, and apply taxes (withholding at source + home tax with credit).
  */
 import type { AddonContext, Holding } from "@wealthfolio/addon-sdk";
 import { project, type PastDividend, type Projection, type UpcomingPayment } from "./projection";
+import { payLagFor, type CalendarSettings } from "./settings";
+import { defaultWithholdingPct, netFactor } from "./tax";
 import { fetchPrimaryDividends, findPrimarySymbol, lastSearchError } from "./yahoo-calendar";
 
 export interface AssetCalendar {
@@ -18,20 +22,30 @@ export interface AssetCalendar {
   symbol: string;
   name: string;
   currency: string;
+  isin: string | null;
   quantity: number;
   price: number | null;
   /** average cost per unit in local currency, when known */
   avgCost: number | null;
   fxRate: number; // local -> base
+  /** withholding at source applied, % */
+  withholdingPct: number;
+  /** what would apply without a user override, % */
+  defaultWithholdingPct: number;
+  /** net / gross factor after all taxes */
+  netFactor: number;
+  payLagDays: number;
   projection: Projection;
-  /** upcoming payments already multiplied by quantity, in base currency */
-  upcoming: Array<UpcomingPayment & { amountBase: number; amountLocal: number }>;
-  /** forward annual yield on current price and on cost, as fractions */
+  /** upcoming payments already multiplied by quantity; gross and net in base currency */
+  upcoming: Array<UpcomingPayment & { amountLocal: number; amountBase: number; netBase: number }>;
+  /** forward annual yield on current price and on cost, as fractions (gross) */
   yieldOnPrice: number | null;
   yieldOnCost: number | null;
   /** annual per-share income used for yields (TTM of the holding's own history) */
   annualPerShare: number | null;
   primarySymbol: string | null;
+  /** true when the next dividend came from the primary listing's calendar */
+  declaredFromPrimary: boolean;
   /** why there is no declared calendar data (diagnostic) */
   calendarNote?: string;
   error?: string;
@@ -41,6 +55,7 @@ export interface CalendarResult {
   assets: AssetCalendar[];
   baseCurrency: string;
   generatedAt: number;
+  settings: CalendarSettings;
 }
 
 const DAY = 86_400;
@@ -91,7 +106,7 @@ function yahooSymbolFor(symbol: string, mic: string | null): string {
 }
 
 function emptyProjection(): Projection {
-  return { cadence: null, lastAmount: null, lastPayDate: null, lastChangePct: null, ttmPerShare: 0, upcoming: [] };
+  return { cadence: null, exRule: null, lastAmount: null, lastExDate: null, lastChangePct: null, ttmPerShare: 0, upcoming: [] };
 }
 
 /**
@@ -110,7 +125,11 @@ function primaryToLocalRatio(local: PastDividend[], primary: PastDividend[]): nu
   return l.amount / best.amount;
 }
 
-export async function buildCalendar(ctx: AddonContext, opts: { now?: number; horizonMonths?: number } = {}): Promise<CalendarResult> {
+export async function buildCalendar(
+  ctx: AddonContext,
+  settings: CalendarSettings,
+  opts: { now?: number; horizonMonths?: number } = {},
+): Promise<CalendarResult> {
   const now = opts.now ?? Math.floor(Date.now() / 1000);
   const horizon = opts.horizonMonths ?? 12;
   const api = ctx.api;
@@ -128,15 +147,21 @@ export async function buildCalendar(ctx: AddonContext, opts: { now?: number; hor
       const symbol = inst.symbol;
       const fxRate = h.fxRate ?? (h.marketValue.local ? h.marketValue.base / h.marketValue.local : 1);
       const avgCost = h.costBasis && h.quantity ? h.costBasis.local / h.quantity : null;
+      const payLagDays = payLagFor(settings, symbol);
       const base = {
         assetId: inst.id,
         symbol,
         name: inst.name ?? symbol,
         currency: inst.currency,
+        isin: null as string | null,
         quantity: h.quantity,
         price: h.price ?? null,
         avgCost,
         fxRate,
+        withholdingPct: settings.assets[symbol]?.withholdingPct ?? 0,
+        defaultWithholdingPct: 0,
+        netFactor: 1,
+        payLagDays,
       };
       const empty = (error?: string): AssetCalendar => ({
         ...base,
@@ -146,6 +171,7 @@ export async function buildCalendar(ctx: AddonContext, opts: { now?: number; hor
         yieldOnCost: null,
         annualPerShare: null,
         primarySymbol: null,
+        declaredFromPrimary: false,
         error,
       });
 
@@ -153,6 +179,9 @@ export async function buildCalendar(ctx: AddonContext, opts: { now?: number; hor
         const profile = await api.assets.getProfile(inst.id).catch(() => null);
         const instrumentType = profile?.instrumentType ?? null;
         if (instrumentType && instrumentType !== "EQUITY") return empty("not-equity");
+
+        const isin = typeof profile?.metadata?.["isin"] === "string" ? (profile.metadata["isin"] as string) : null;
+        base.isin = isin;
 
         // 1. History through the host (provider-aware). Pass symbol + MIC so the host
         //    resolver turns `RY6` + `XFRA` into Yahoo's `RY6.F`.
@@ -172,11 +201,21 @@ export async function buildCalendar(ctx: AddonContext, opts: { now?: number; hor
 
         // 2. Declared next dividend from the US primary listing (crumb-free chart API).
         const yahooLocal = yahooSymbolFor(providerSymbol, mic);
-        const isin = typeof profile?.metadata?.["isin"] === "string" ? (profile.metadata["isin"] as string) : null;
         let primary: string | null = null;
         if (isin) primary = await findPrimarySymbol(api.network, isin);
         if (!primary && inst.name) primary = await findPrimarySymbol(api.network, inst.name);
         if (primary === yahooLocal) primary = null; // we already hold the primary
+
+        // Withholding at source: user override > ISIN country > "has a US primary listing" (the
+        // host does not persist the ISIN, so a US stock held through a European listing is
+        // recognised by its primary) > 0.
+        base.defaultWithholdingPct = isin ? defaultWithholdingPct(isin) : primary ? 15 : 0;
+        base.withholdingPct = settings.assets[symbol]?.withholdingPct ?? base.defaultWithholdingPct;
+        base.netFactor = netFactor({
+          withholdingPct: base.withholdingPct,
+          homeTaxPct: settings.homeTaxPct,
+          creditCapPct: settings.creditCapPct,
+        });
 
         let declared: { amount: number; exDate: number } | null = null;
         let calendarNote: string | undefined;
@@ -193,13 +232,13 @@ export async function buildCalendar(ctx: AddonContext, opts: { now?: number; hor
           calendarNote = lastSearchError ?? "no-primary";
         }
 
-        const projection = project(history, { now, horizonMonths: horizon, declared });
+        const projection = project(history, { now, horizonMonths: horizon, declared, payLagDays });
         const annualPerShare = projection.ttmPerShare || null;
-        const upcoming = projection.upcoming.map((u) => ({
-          ...u,
-          amountLocal: u.amountPerShare * h.quantity,
-          amountBase: u.amountPerShare * h.quantity * fxRate,
-        }));
+        const upcoming = projection.upcoming.map((u) => {
+          const amountLocal = u.amountPerShare * h.quantity;
+          const amountBase = amountLocal * fxRate;
+          return { ...u, amountLocal, amountBase, netBase: amountBase * base.netFactor };
+        });
         return {
           ...base,
           projection,
@@ -208,6 +247,7 @@ export async function buildCalendar(ctx: AddonContext, opts: { now?: number; hor
           yieldOnPrice: annualPerShare && h.price ? annualPerShare / h.price : null,
           yieldOnCost: annualPerShare && avgCost ? annualPerShare / avgCost : null,
           primarySymbol: primary,
+          declaredFromPrimary: declared != null,
           calendarNote: declared ? undefined : calendarNote,
         };
       } catch (e) {
@@ -216,5 +256,5 @@ export async function buildCalendar(ctx: AddonContext, opts: { now?: number; hor
     }),
   );
 
-  return { assets: assets.filter((a) => a.error !== "not-equity"), baseCurrency, generatedAt: now };
+  return { assets: assets.filter((a) => a.error !== "not-equity"), baseCurrency, generatedAt: now, settings };
 }

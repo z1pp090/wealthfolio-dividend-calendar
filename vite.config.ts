@@ -11,6 +11,7 @@ const hostProvidedDependencies = [
   "react-dom/client",
   "react/jsx-dev-runtime",
   "react/jsx-runtime",
+  "recharts",
 ];
 
 export default defineConfig({

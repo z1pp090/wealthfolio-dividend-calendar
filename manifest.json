@@ -1,8 +1,8 @@
 {
   "id": "dividend-calendar-addon",
   "name": "Dividend Calendar",
-  "version": "0.1.0",
-  "description": "Upcoming dividends for your holdings: next 12 months by asset and by month, from provider history (projected) and Yahoo calendar events (declared).",
+  "version": "0.2.0",
+  "description": "Upcoming dividends for your holdings: next 12 months by asset and by month, gross and net of taxes, with ex-date patterns inferred from history, declared dates from Yahoo, a monthly goal bar and a chart.",
   "author": "z1pp090",
   "main": "dist/addon.js",
   "sdkVersion": "3.8.0",
@@ -37,7 +37,8 @@
     "@wealthfolio/addon-sdk": "^3.8.0",
     "@wealthfolio/ui": "^3.8.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "recharts": "^3.7.0"
   },
   "permissions": [
     {
