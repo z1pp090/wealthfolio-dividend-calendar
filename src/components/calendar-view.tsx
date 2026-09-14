@@ -129,14 +129,21 @@ export function CalendarView({ data, hidden }: Props) {
   const cumulativeSeries = useMemo(() => cumulative(received), [received]);
   const yearRows = useMemo(() => byYear(received), [received]);
 
-  // ---- colours ------------------------------------------------------------------------
-  const symbols = useMemo(() => {
-    const s = rows.map((r) => r.asset.symbol);
-    for (const e of received) if (!s.includes(e.symbol)) s.push(e.symbol);
-    return s;
-  }, [rows, received]);
-  const colorOf = (symbol: string) => PALETTE[Math.max(0, symbols.indexOf(symbol)) % PALETTE.length];
-  const chartConfig: ChartConfig = Object.fromEntries(symbols.map((s) => [s, { label: s, color: colorOf(s) }]));
+  // ---- series: current holdings; dividends of positions no longer held are folded into one
+  //      "sold" series so the legend and the tables only list what is in the portfolio ----------
+  const OTHER = "__sold__";
+  const held = useMemo(() => rows.map((r) => r.asset.symbol), [rows]);
+  const hasSold = received.some((e) => !held.includes(e.symbol));
+  const symbols = useMemo(() => (hasSold ? [...held, OTHER] : held), [held, hasSold]);
+  const seriesOf = (symbol: string) => (held.includes(symbol) ? symbol : OTHER);
+  const labelOf = (s: string) => (s === OTHER ? t("months.sold") : s);
+  const colorOf = (symbol: string) => (seriesOf(symbol) === OTHER ? "#8a8a8a" : PALETTE[Math.max(0, held.indexOf(symbol)) % PALETTE.length]);
+  const chartConfig: ChartConfig = Object.fromEntries(symbols.map((s) => [s, { label: labelOf(s), color: colorOf(s) }]));
+  const sumBySeries = (bySymbol: Record<string, number>): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const [sym, v] of Object.entries(bySymbol)) out[seriesOf(sym)] = (out[seriesOf(sym)] ?? 0) + v;
+    return out;
+  };
 
   // ---- 24-month chart: 12 received + 12 projected ---------------------------------------
   const pastKeys = useMemo(() => pastMonthKeys(now, 12), [now]);
@@ -144,8 +151,9 @@ export function CalendarView({ data, hidden }: Props) {
     const out: Array<Record<string, number | string | boolean>> = [];
     for (const k of pastKeys) {
       const b = receivedMonths.get(k);
+      const bySeries = b ? sumBySeries(b.bySymbol) : {};
       const row: Record<string, number | string | boolean> = { month: fmtMonth(k), key: k, past: true, total: b?.net ?? 0 };
-      for (const s of symbols) row[s] = b?.bySymbol[s] ?? 0;
+      for (const s of symbols) row[s] = bySeries[s] ?? 0;
       out.push(row);
     }
     months.forEach((k, i) => {
@@ -154,7 +162,8 @@ export function CalendarView({ data, hidden }: Props) {
       // the current month may also hold payments already received
       const b = receivedMonths.get(k);
       if (b) {
-        for (const s of symbols) row[s] = (row[s] as number) + (b.bySymbol[s] ?? 0);
+        const bySeries = sumBySeries(b.bySymbol);
+        for (const s of symbols) row[s] = (row[s] as number) + (bySeries[s] ?? 0);
         row.total = (row.total as number) + b.net;
       }
       out.push(row);
@@ -162,7 +171,6 @@ export function CalendarView({ data, hidden }: Props) {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pastKeys, months, receivedMonths, rows, monthTotals, symbols, locale]);
-  const todayLabel = fmtMonth(monthKey(now));
 
   // ---- goal + long-term -----------------------------------------------------------------
   const goal = data.settings.goalMonthly;
@@ -236,12 +244,6 @@ export function CalendarView({ data, hidden }: Props) {
               <YAxis tickLine={false} axisLine={false} fontSize={11} width={56} tickFormatter={axisMoney} />
               <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.4 }} content={moneyTooltip} />
               <ChartLegend content={<ChartLegendContent />} />
-              <ReferenceLine
-                x={todayLabel}
-                stroke="var(--muted-foreground)"
-                strokeDasharray="4 4"
-                label={{ value: t("months.today"), position: "top", fontSize: 10, fill: "var(--muted-foreground)" }}
-              />
               {symbols.map((s) => (
                 <Bar key={s} dataKey={s} stackId="net" fill={`var(--color-${s})`} radius={0}>
                   {chart24.map((row, i) => (
@@ -423,25 +425,28 @@ export function CalendarView({ data, hidden }: Props) {
                 <tr>
                   <th className="py-1 pr-3">{t("years.year")}</th>
                   {symbols.map((s) => (
-                    <th key={s} className="py-1 pr-3 text-right">{s}</th>
+                    <th key={s} className="py-1 pr-3 text-right">{labelOf(s)}</th>
                   ))}
                   <th className="py-1 pr-3 text-right">{t("years.total")}</th>
                   <th className="py-1 text-right">{t("years.growth")}</th>
                 </tr>
               </thead>
               <tbody>
-                {yearRows.map((r) => (
+                {yearRows.map((r) => {
+                  const bySeries = sumBySeries(r.bySymbol);
+                  return (
                   <tr key={r.year} className="border-border/50 border-t">
                     <td className="py-1.5 pr-3 font-medium">{r.year}</td>
                     {symbols.map((s) => (
-                      <td key={s} className="py-1.5 pr-3 text-right tabular-nums">{r.bySymbol[s] ? fmtMoney(r.bySymbol[s]) : <span className="text-muted-foreground">·</span>}</td>
+                      <td key={s} className="py-1.5 pr-3 text-right tabular-nums">{bySeries[s] ? fmtMoney(bySeries[s]) : <span className="text-muted-foreground">·</span>}</td>
                     ))}
                     <td className="py-1.5 pr-3 text-right font-medium tabular-nums">{fmtMoney(r.total)}</td>
                     <td className={`py-1.5 text-right ${r.growth == null ? "text-muted-foreground" : r.growth >= 0 ? "text-success" : "text-destructive"}`}>
                       {r.growth == null ? "—" : `${r.growth >= 0 ? "+" : ""}${(r.growth * 100).toFixed(1)} %`}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}

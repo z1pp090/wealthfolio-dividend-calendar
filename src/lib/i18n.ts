@@ -28,7 +28,7 @@ export const translations: AddonTranslationResources = {
       title: "Dividends by month",
       received: "Received",
       projected: "Projected",
-      today: "today",
+      sold: "Sold positions",
     },
     cumulative: {
       title: "Cumulative received",
@@ -156,7 +156,7 @@ export const translations: AddonTranslationResources = {
       title: "Dividendos por mes",
       received: "Cobrado",
       projected: "Proyectado",
-      today: "hoy",
+      sold: "Posiciones vendidas",
     },
     cumulative: {
       title: "Cobrado acumulado",
