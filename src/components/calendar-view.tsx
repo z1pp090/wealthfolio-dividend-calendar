@@ -6,6 +6,8 @@ import {
   CardHeader,
   CardTitle,
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   Progress,
@@ -98,8 +100,7 @@ export function CalendarView({ data, hidden }: Props) {
     () =>
       data.assets
         .flatMap((a) => a.upcoming.map((u) => ({ a, u })))
-        .sort((x, y) => x.u.payDate - y.u.payDate)
-        .slice(0, 36),
+        .sort((x, y) => x.u.payDate - y.u.payDate),
     [data],
   );
 
@@ -147,7 +148,7 @@ export function CalendarView({ data, hidden }: Props) {
           <CardTitle className="text-sm font-medium">{t("chart.title")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <ChartContainer config={chartConfig} className="h-56 w-full">
+          <ChartContainer config={chartConfig} className="h-64 w-full">
             <BarChart data={chartData} margin={{ left: 4, right: 4, top: 8, bottom: 0 }}>
               <CartesianGrid vertical={false} strokeDasharray="3 3" />
               <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={11} />
@@ -171,6 +172,7 @@ export function CalendarView({ data, hidden }: Props) {
                   />
                 }
               />
+              <ChartLegend content={<ChartLegendContent />} />
               {chartAssets.map((s) => (
                 <Bar key={s} dataKey={s} stackId="net" fill={`var(--color-${s})`} radius={0} />
               ))}
@@ -183,9 +185,10 @@ export function CalendarView({ data, hidden }: Props) {
         <CardHeader>
           <CardTitle className="text-sm font-medium">{t("upcoming.title")}</CardTitle>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        {/* Inline styles: the addon ships no Tailwind CSS of its own, only classes the host already has. */}
+        <CardContent style={{ maxHeight: "22rem", overflow: "auto" }}>
           <table className="w-full text-sm">
-            <thead className="text-muted-foreground text-left text-xs">
+            <thead className="bg-card text-muted-foreground text-left text-xs" style={{ position: "sticky", top: 0, zIndex: 1 }}>
               <tr>
                 <th className="py-1 pr-3">{t("upcoming.payDate")}</th>
                 <th className="py-1 pr-3">{t("upcoming.exDate")}</th>
@@ -349,7 +352,7 @@ function AssetRow({
 
 function Stat({ title, value, hint }: { title: string; value: string; hint?: string }) {
   return (
-    <Card className="border-yellow-500/10 bg-yellow-500/10">
+    <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium">{title}</CardTitle>
       </CardHeader>
