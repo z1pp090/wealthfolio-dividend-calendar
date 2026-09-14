@@ -1,7 +1,7 @@
 {
   "id": "dividend-calendar-addon",
   "name": "Dividend Calendar",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Upcoming dividends for your holdings: next 12 months by asset and by month, gross and net of taxes, with ex-date patterns inferred from history, declared dates from Yahoo, a monthly goal bar and a chart.",
   "author": "z1pp090",
   "main": "dist/addon.js",

@@ -1,6 +1,6 @@
 {
   "name": "dividend-calendar-addon",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Wealthfolio addon: upcoming dividends for your holdings, gross and net, projected from history and declared via Yahoo calendar events",
   "type": "module",
   "main": "dist/addon.js",
