@@ -1,6 +1,11 @@
 # Dividend Calendar — Wealthfolio addon
 
-Upcoming dividends for your holdings, next 12 months, gross and **net of taxes**:
+Dividend income for your holdings, past and future, gross and **net of taxes**. Inspired by the dividend views of Snowball Analytics and getquin, built on Wealthfolio's own data:
+
+- **Received**: last 12 months and since the start (from your DIVIDEND activities), a **cumulative** curve that only goes up, and a **per-year table** with growth.
+- **Dividends by month**: 12 months received + 12 months projected in one chart, stacked by asset.
+- **Month calendar** (getquin-style): a day grid with ex-dates, projected payments and past payments, month by month.
+- **Long-term projection**: when your net monthly income reaches your goal, given new money per month, dividend growth and reinvestment.
 
 - **Monthly goal bar** (optional): net monthly average vs. your target.
 - **Net income by month** chart, stacked by asset.
@@ -17,7 +22,8 @@ Upcoming dividends for your holdings, next 12 months, gross and **net of taxes**
 3. Pay date = ex-date + the asset's lag (default 15 days, configurable), rolled forward off weekends. A dividend whose ex-date already passed but whose pay date is still ahead is listed as *declared*.
 4. Amounts: monthly payers repeat the last amount; quarterly/semi-annual/annual payers use the **same period a year earlier scaled by the latest year-on-year change** (ETF distributions differ within a year).
 5. If the instrument has a US primary listing (found by ISIN or name via Yahoo search), it also reads that listing's `chart?events=div`, which exposes the latest **declared** dividend (ex-date in the future) weeks before European listings show it. Its amount is converted with the ratio between the two listings' last payments.
-6. Taxes: `net = gross × (1 − w − max(0, t − min(w, cap)))` with `w` = withholding at source (user override, else by ISIN country, else 15 % when a US primary listing exists), `t` = home tax, `cap` = creditable foreign tax. Defaults: t = 19 %, cap = 15 % (Spain); change them in Settings.
+6. Taxes, two views (Settings): **cash at the broker** `net = gross × (1 − w) × (1 − t)` (the home tax is withheld on what is left after the foreign withholding; default), or **after the tax return** `net = gross × (1 − w − max(0, t − min(w, cap)))`. `w` = withholding at source (user override, else by ISIN country, else 15 % when a US primary listing exists), `t` = home tax, `cap` = creditable foreign tax. Defaults: t = 19 %, cap = 15 % (Spain).
+7. Long-term projection: `income[k+1] = income[k] × (1 + g) + newMoney[k] × y`, with `y` = net forward yield on market value, `g` = dividend growth, `newMoney` = 12 × contribution (+ reinvested dividends). No inflation, no price drift: the host's retirement planner does the full model.
 
 Everything is computed locally; the only network calls are to `query1/query2.finance.yahoo.com` through the host's brokered network API.
 

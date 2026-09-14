@@ -4,6 +4,7 @@
  */
 import type { AddonContext } from "@wealthfolio/addon-sdk";
 import { EX_TO_PAY_DAYS } from "./projection";
+import type { NetMode } from "./tax";
 
 export interface AssetSettings {
   /** days from ex-date to pay date */
@@ -19,6 +20,14 @@ export interface CalendarSettings {
   homeTaxPct: number;
   /** maximum foreign withholding creditable at home, % */
   creditCapPct: number;
+  /** "broker" = cash that lands in the account; "afterReturn" = after the foreign tax credit */
+  netMode: NetMode;
+  /** long-term projection: new money per month in base currency */
+  monthlyContribution: number;
+  /** long-term projection: annual growth of dividends per share, % */
+  dividendGrowthPct: number;
+  /** long-term projection: dividends are reinvested */
+  reinvest: boolean;
   /** keyed by instrument symbol */
   assets: Record<string, AssetSettings>;
 }
@@ -27,6 +36,10 @@ export const DEFAULT_SETTINGS: CalendarSettings = {
   goalMonthly: 0,
   homeTaxPct: 19,
   creditCapPct: 15,
+  netMode: "broker",
+  monthlyContribution: 0,
+  dividendGrowthPct: 3,
+  reinvest: true,
   assets: {},
 };
 
@@ -50,6 +63,10 @@ export function normalizeSettings(raw: unknown): CalendarSettings {
     goalMonthly: Math.max(0, num(r.goalMonthly, DEFAULT_SETTINGS.goalMonthly)),
     homeTaxPct: num(r.homeTaxPct, DEFAULT_SETTINGS.homeTaxPct),
     creditCapPct: num(r.creditCapPct, DEFAULT_SETTINGS.creditCapPct),
+    netMode: r.netMode === "afterReturn" ? "afterReturn" : "broker",
+    monthlyContribution: Math.max(0, num(r.monthlyContribution, DEFAULT_SETTINGS.monthlyContribution)),
+    dividendGrowthPct: num(r.dividendGrowthPct, DEFAULT_SETTINGS.dividendGrowthPct),
+    reinvest: typeof r.reinvest === "boolean" ? r.reinvest : DEFAULT_SETTINGS.reinvest,
     assets,
   };
 }

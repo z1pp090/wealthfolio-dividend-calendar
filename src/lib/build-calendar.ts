@@ -15,6 +15,7 @@ import type { AddonContext, Holding } from "@wealthfolio/addon-sdk";
 import { project, type PastDividend, type Projection, type UpcomingPayment } from "./projection";
 import { payLagFor, type CalendarSettings } from "./settings";
 import { defaultWithholdingPct, netFactor } from "./tax";
+import type { ReceivedDividend } from "./received";
 import { fetchPrimaryDividends, findPrimarySymbol, lastSearchError } from "./yahoo-calendar";
 
 export interface AssetCalendar {
@@ -56,6 +57,38 @@ export interface CalendarResult {
   baseCurrency: string;
   generatedAt: number;
   settings: CalendarSettings;
+  /** dividends actually received (all DIVIDEND activities), base currency */
+  received: ReceivedDividend[];
+  /** market value of the dividend-paying holdings, base currency */
+  marketValue: number;
+}
+
+/** DIVIDEND activities -> received events in base currency. Pure, exported for tests. */
+export function receivedFromActivities(
+  activities: Array<{
+    activityType: string;
+    date: Date | string | number;
+    amount?: string | number | null;
+    tax?: string | number | null;
+    fxRate?: string | number | null;
+    currency: string;
+    assetSymbol?: string;
+  }>,
+  baseCurrency: string,
+): ReceivedDividend[] {
+  const out: ReceivedDividend[] = [];
+  for (const a of activities) {
+    if (a.activityType !== "DIVIDEND") continue;
+    const net = Number(a.amount ?? 0);
+    if (!Number.isFinite(net) || net <= 0) continue;
+    const tax = Number(a.tax ?? 0) || 0;
+    const fx = a.currency === baseCurrency ? 1 : Number(a.fxRate ?? 1) || 1;
+    const t = a.date instanceof Date ? a.date.getTime() : typeof a.date === "number" ? a.date : Date.parse(a.date);
+    if (!Number.isFinite(t)) continue;
+    const date = Math.floor(t / 1000 / DAY) * DAY;
+    out.push({ date, symbol: a.assetSymbol ?? "?", net: net * fx, gross: (net + tax) * fx });
+  }
+  return out.sort((x, y) => x.date - y.date);
 }
 
 const DAY = 86_400;
@@ -141,6 +174,10 @@ export async function buildCalendar(
   const holdings = mergeHoldings(perAccount.flat());
   const baseCurrency = holdings[0]?.baseCurrency ?? "EUR";
 
+  // Dividends actually received, for the "past 12 months", cumulative and per-year views.
+  const activities = await api.activities.getAll().catch(() => []);
+  const received = receivedFromActivities(activities, baseCurrency);
+
   const assets = await Promise.all(
     holdings.map(async (h): Promise<AssetCalendar> => {
       const inst = h.instrument!;
@@ -215,6 +252,7 @@ export async function buildCalendar(
           withholdingPct: base.withholdingPct,
           homeTaxPct: settings.homeTaxPct,
           creditCapPct: settings.creditCapPct,
+          mode: settings.netMode,
         });
 
         let declared: { amount: number; exDate: number } | null = null;
@@ -256,5 +294,8 @@ export async function buildCalendar(
     }),
   );
 
-  return { assets: assets.filter((a) => a.error !== "not-equity"), baseCurrency, generatedAt: now, settings };
+  const kept = assets.filter((a) => a.error !== "not-equity");
+  const keptIds = new Set(kept.map((a) => a.assetId));
+  const marketValue = holdings.filter((h) => h.instrument && keptIds.has(h.instrument.id)).reduce((s, h) => s + h.marketValue.base, 0);
+  return { assets: kept, baseCurrency, generatedAt: now, settings, received, marketValue };
 }

@@ -4,10 +4,12 @@
  *
  *   net = gross × (1 − w − max(0, t − min(w, cap)))
  *
- * Example (Spain, US stock): w = 15, t = 19, cap = 15 → net = gross × 0.81.
- * Example (Spain, Irish UCITS ETF): w = 0, t = 19 → net = gross × 0.81.
- * Example (Spain, 30 % withheld without W-8BEN): w = 30, t = 19, cap = 15 → 0.66.
+ * Two views (see NetMode): at the broker a Spanish account receives gross × 0.85 × 0.81 = 0.6885
+ * of a US dividend (15 % withheld, then 19 % on the rest); after the annual return the credit
+ * brings it to 0.81. An Irish UCITS ETF pays 0.81 in both views.
  */
+export type NetMode = "broker" | "afterReturn";
+
 export interface TaxRates {
   /** withholding at source, % */
   withholdingPct: number;
@@ -15,6 +17,13 @@ export interface TaxRates {
   homeTaxPct: number;
   /** maximum foreign tax creditable at home, % */
   creditCapPct: number;
+  /**
+   * "broker": what lands in the account. Brokers withhold the home tax on the amount left
+   *   after the foreign withholding: net = gross × (1 − w) × (1 − t). The foreign tax is
+   *   only recovered later, in the annual return.
+   * "afterReturn": after that credit: net = gross × (1 − w − max(0, t − min(w, cap))).
+   */
+  mode?: NetMode;
 }
 
 const clampPct = (v: number) => (Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0);
@@ -23,6 +32,7 @@ export function netFactor(r: TaxRates): number {
   const w = clampPct(r.withholdingPct) / 100;
   const t = clampPct(r.homeTaxPct) / 100;
   const cap = clampPct(r.creditCapPct) / 100;
+  if ((r.mode ?? "broker") === "broker") return (1 - w) * (1 - t);
   const credit = Math.min(w, cap);
   const home = Math.max(0, t - credit);
   return Math.max(0, 1 - w - home);

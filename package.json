@@ -1,6 +1,6 @@
 {
   "name": "dividend-calendar-addon",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Wealthfolio addon: upcoming dividends for your holdings, gross and net, projected from history and declared via Yahoo calendar events",
   "type": "module",
   "main": "dist/addon.js",
@@ -25,7 +25,7 @@
     "package": "node scripts/package.mjs",
     "bundle": "pnpm clean && pnpm build && pnpm package",
     "type-check": "tsc --noEmit",
-    "test": "tsc src/lib/projection.ts src/lib/tax.ts --outDir dist-test --module es2020 --target es2020 --moduleResolution bundler --lib es2020,dom && node --test \"tests/*.test.mjs\""
+    "test": "tsc src/lib/projection.ts src/lib/tax.ts src/lib/received.ts src/lib/long-term.ts --outDir dist-test --module es2020 --target es2020 --moduleResolution bundler --lib es2020,dom && node --test \"tests/*.test.mjs\""
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5.90.0",

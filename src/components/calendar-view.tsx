@@ -14,9 +14,12 @@ import {
   type ChartConfig,
 } from "@wealthfolio/ui";
 import { useMemo } from "react";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import type { AssetCalendar, CalendarResult } from "../lib/build-calendar";
+import { projectLongTerm } from "../lib/long-term";
 import { monthKey, monthKeys, type ExRule } from "../lib/projection";
+import { byMonth as receivedByMonth, byYear, cumulative, trailing12 } from "../lib/received";
+import { MonthGrid } from "./month-grid";
 
 interface Props {
   data: CalendarResult;
@@ -29,13 +32,27 @@ const localeFor = (lang: string) => LOCALES[lang] ?? lang;
 /** Distinct hues that read on both themes (the host's --chart-N tokens are shades of one hue). */
 const PALETTE = ["#4f9d9d", "#c9a227", "#8e7cc3", "#d97757", "#6aa84f", "#c95d8a", "#5b8def"];
 
+/** Previous N month keys ending the month before `now`. */
+function pastMonthKeys(now: number, n: number): string[] {
+  const d = new Date(now * 1000);
+  const keys: string[] = [];
+  for (let i = n; i >= 1; i--) {
+    const m = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1));
+    keys.push(monthKey(Math.floor(m.getTime() / 1000)));
+  }
+  return keys;
+}
+
 export function CalendarView({ data, hidden }: Props) {
   const { t, language } = useAddonTranslation();
   const locale = localeFor(language);
   const ccy = data.baseCurrency;
+  const now = data.generatedAt;
 
   const fmtMoney = (v: number) =>
     hidden ? "••••" : new Intl.NumberFormat(locale, { style: "currency", currency: ccy, maximumFractionDigits: 2 }).format(v);
+  const fmtMoney0 = (v: number) =>
+    hidden ? "••••" : new Intl.NumberFormat(locale, { style: "currency", currency: ccy, maximumFractionDigits: 0 }).format(v);
   const fmtPct = (v: number | null) => (v == null ? "—" : `${(v * 100).toLocaleString(locale, { maximumFractionDigits: 2 })} %`);
   const fmtDate = (unix: number | null) =>
     unix == null ? "—" : new Date(unix * 1000).toLocaleDateString(locale, { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
@@ -59,7 +76,8 @@ export function CalendarView({ data, hidden }: Props) {
     }
   };
 
-  const months = useMemo(() => monthKeys(data.generatedAt, 12), [data.generatedAt]);
+  // ---- future (projected) -----------------------------------------------------------
+  const months = useMemo(() => monthKeys(now, 12), [now]);
 
   const rows = useMemo(() => {
     return data.assets
@@ -97,33 +115,96 @@ export function CalendarView({ data, hidden }: Props) {
   const paymentsCount = data.assets.reduce((s, a) => s + a.upcoming.length, 0);
 
   const upcomingList = useMemo(
-    () =>
-      data.assets
-        .flatMap((a) => a.upcoming.map((u) => ({ a, u })))
-        .sort((x, y) => x.u.payDate - y.u.payDate),
+    () => data.assets.flatMap((a) => a.upcoming.map((u) => ({ a, u }))).sort((x, y) => x.u.payDate - y.u.payDate),
     [data],
   );
 
-  // Chart: one stacked bar per month, one series per asset (net, base currency).
-  const chartAssets = rows.map((r) => r.asset.symbol);
-  const chartConfig: ChartConfig = Object.fromEntries(
-    chartAssets.map((s, i) => [s, { label: s, color: PALETTE[i % PALETTE.length] }]),
-  );
-  const chartData = months.map((m, i) => {
-    const row: Record<string, number | string> = { month: fmtMonth(m), total: monthTotals[i].net };
-    for (const r of rows) row[r.asset.symbol] = r.byMonth.get(m)?.net ?? 0;
-    return row;
-  });
+  // ---- past (received) ----------------------------------------------------------------
+  const received = data.received;
+  const receivedMonths = useMemo(() => receivedByMonth(received), [received]);
+  const received12 = trailing12(received, now);
+  const received12Count = received.filter((e) => e.date > now - 365 * 86_400 && e.date <= now).length;
+  const receivedTotal = received.reduce((s, e) => s + e.net, 0);
+  const firstReceived = received[0]?.date ?? null;
+  const cumulativeSeries = useMemo(() => cumulative(received), [received]);
+  const yearRows = useMemo(() => byYear(received), [received]);
 
+  // ---- colours ------------------------------------------------------------------------
+  const symbols = useMemo(() => {
+    const s = rows.map((r) => r.asset.symbol);
+    for (const e of received) if (!s.includes(e.symbol)) s.push(e.symbol);
+    return s;
+  }, [rows, received]);
+  const colorOf = (symbol: string) => PALETTE[Math.max(0, symbols.indexOf(symbol)) % PALETTE.length];
+  const chartConfig: ChartConfig = Object.fromEntries(symbols.map((s) => [s, { label: s, color: colorOf(s) }]));
+
+  // ---- 24-month chart: 12 received + 12 projected ---------------------------------------
+  const pastKeys = useMemo(() => pastMonthKeys(now, 12), [now]);
+  const chart24 = useMemo(() => {
+    const out: Array<Record<string, number | string | boolean>> = [];
+    for (const k of pastKeys) {
+      const b = receivedMonths.get(k);
+      const row: Record<string, number | string | boolean> = { month: fmtMonth(k), key: k, past: true, total: b?.net ?? 0 };
+      for (const s of symbols) row[s] = b?.bySymbol[s] ?? 0;
+      out.push(row);
+    }
+    months.forEach((k, i) => {
+      const row: Record<string, number | string | boolean> = { month: fmtMonth(k), key: k, past: false, total: monthTotals[i].net };
+      for (const s of symbols) row[s] = rows.find((r) => r.asset.symbol === s)?.byMonth.get(k)?.net ?? 0;
+      // the current month may also hold payments already received
+      const b = receivedMonths.get(k);
+      if (b) {
+        for (const s of symbols) row[s] = (row[s] as number) + (b.bySymbol[s] ?? 0);
+        row.total = (row.total as number) + b.net;
+      }
+      out.push(row);
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pastKeys, months, receivedMonths, rows, monthTotals, symbols, locale]);
+  const todayLabel = fmtMonth(monthKey(now));
+
+  // ---- goal + long-term -----------------------------------------------------------------
   const goal = data.settings.goalMonthly;
   const goalPct = goal > 0 ? Math.min(1, monthlyNet / goal) : 0;
+  const longTerm = useMemo(
+    () =>
+      projectLongTerm({
+        annualNet: total12Net,
+        marketValue: data.marketValue,
+        monthlyContribution: data.settings.monthlyContribution,
+        dividendGrowth: data.settings.dividendGrowthPct / 100,
+        reinvest: data.settings.reinvest,
+        goalMonthly: goal,
+        startYear: new Date(now * 1000).getUTCFullYear(),
+        maxYears: 40,
+      }),
+    [total12Net, data.marketValue, data.settings, goal, now],
+  );
+  const longTermPoints = useMemo(() => {
+    const end = longTerm.goalYear ? Math.min(longTerm.points.length - 1, longTerm.goalYear - longTerm.points[0].year + 3) : 30;
+    return longTerm.points.slice(0, end + 1);
+  }, [longTerm]);
+
+  const moneyTooltip = (
+    <ChartTooltipContent
+      formatter={(v, name) => (
+        <div className="flex w-full items-center justify-between gap-4">
+          <span className="text-muted-foreground">{name}</span>
+          <span className="font-mono font-medium tabular-nums">{fmtMoney(Number(v))}</span>
+        </div>
+      )}
+    />
+  );
+  const axisMoney = (v: number) => (hidden ? "••" : new Intl.NumberFormat(locale, { maximumFractionDigits: Math.abs(v) < 20 ? 1 : 0 }).format(v));
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Stat title={t("stats.next12")} value={fmtMoney(total12Net)} hint={t("stats.next12Gross", { value: fmtMoney(total12Gross) })} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat title={t("stats.next12")} value={fmtMoney(total12Net)} hint={`${t("stats.next12Gross", { value: fmtMoney(total12Gross) })} · ${t("stats.paymentsHint", { count: paymentsCount, declared: declaredCount })}`} />
         <Stat title={t("stats.monthlyAvg")} value={fmtMoney(monthlyNet)} />
-        <Stat title={t("stats.payments")} value={`${paymentsCount}`} hint={t("stats.paymentsHint", { declared: declaredCount })} />
+        <Stat title={t("stats.received12")} value={fmtMoney(received12)} hint={t("stats.received12Hint", { count: received12Count })} />
+        <Stat title={t("stats.receivedTotal")} value={fmtMoney(receivedTotal)} hint={firstReceived ? t("stats.receivedTotalHint", { date: fmtDate(firstReceived) }) : undefined} />
       </div>
 
       {goal > 0 && (
@@ -145,41 +226,102 @@ export function CalendarView({ data, hidden }: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-medium">{t("chart.title")}</CardTitle>
+          <CardTitle className="text-sm font-medium">{t("months.title")}</CardTitle>
         </CardHeader>
         <CardContent>
           <ChartContainer config={chartConfig} className="h-64 w-full">
-            <BarChart data={chartData} margin={{ left: 4, right: 4, top: 8, bottom: 0 }}>
+            <BarChart data={chart24} margin={{ left: 4, right: 4, top: 16, bottom: 0 }}>
               <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={11} />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                fontSize={11}
-                width={56}
-                tickFormatter={(v: number) => (hidden ? "••" : new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(v))}
-              />
-              <ChartTooltip
-                cursor={{ fill: "var(--muted)", opacity: 0.4 }}
-                content={
-                  <ChartTooltipContent
-                    formatter={(v, name) => (
-                      <div className="flex w-full items-center justify-between gap-4">
-                        <span className="text-muted-foreground">{name}</span>
-                        <span className="font-mono font-medium tabular-nums">{fmtMoney(Number(v))}</span>
-                      </div>
-                    )}
-                  />
-                }
-              />
+              <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={11} interval={1} />
+              <YAxis tickLine={false} axisLine={false} fontSize={11} width={56} tickFormatter={axisMoney} />
+              <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.4 }} content={moneyTooltip} />
               <ChartLegend content={<ChartLegendContent />} />
-              {chartAssets.map((s) => (
-                <Bar key={s} dataKey={s} stackId="net" fill={`var(--color-${s})`} radius={0} />
+              <ReferenceLine
+                x={todayLabel}
+                stroke="var(--muted-foreground)"
+                strokeDasharray="4 4"
+                label={{ value: t("months.today"), position: "top", fontSize: 10, fill: "var(--muted-foreground)" }}
+              />
+              {symbols.map((s) => (
+                <Bar key={s} dataKey={s} stackId="net" fill={`var(--color-${s})`} radius={0}>
+                  {chart24.map((row, i) => (
+                    <Cell key={i} fillOpacity={row.past ? 0.45 : 1} />
+                  ))}
+                </Bar>
               ))}
             </BarChart>
           </ChartContainer>
+          <p className="text-muted-foreground mt-1 text-xs">
+            <span style={{ opacity: 0.45 }}>■</span> {t("months.received")} · ■ {t("months.projected")}
+          </p>
         </CardContent>
       </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">{t("cumulative.title")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {cumulativeSeries.length === 0 ? (
+              <p className="text-muted-foreground text-sm">{t("cumulative.empty")}</p>
+            ) : (
+              <ChartContainer config={{ total: { label: t("cumulative.title"), color: PALETTE[0] } }} className="h-48 w-full">
+                <AreaChart data={cumulativeSeries.map((p) => ({ month: fmtMonth(p.month), total: p.total }))} margin={{ left: 4, right: 4, top: 8, bottom: 0 }}>
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={11} />
+                  <YAxis tickLine={false} axisLine={false} fontSize={11} width={56} tickFormatter={axisMoney} />
+                  <ChartTooltip content={moneyTooltip} />
+                  <Area type="monotone" dataKey="total" stroke="var(--color-total)" fill="var(--color-total)" fillOpacity={0.25} />
+                </AreaChart>
+              </ChartContainer>
+            )}
+            <p className="text-muted-foreground mt-1 text-xs">{t("cumulative.hint")}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">{t("longTerm.title")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-2 text-sm font-medium">
+              {goal <= 0
+                ? t("longTerm.noGoal")
+                : longTerm.goalYear
+                  ? t("longTerm.reach", { goal: fmtMoney0(goal), year: longTerm.goalYear })
+                  : t("longTerm.notReached", { years: 40 })}
+            </p>
+            <ChartContainer config={{ monthly: { label: t("longTerm.monthly"), color: PALETTE[1] } }} className="h-40 w-full">
+              <LineChart data={longTermPoints} margin={{ left: 4, right: 4, top: 8, bottom: 0 }}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis dataKey="year" tickLine={false} axisLine={false} fontSize={11} />
+                <YAxis tickLine={false} axisLine={false} fontSize={11} width={56} tickFormatter={axisMoney} />
+                <ChartTooltip content={moneyTooltip} />
+                {goal > 0 && (
+                  <ReferenceLine
+                    y={goal}
+                    stroke="var(--muted-foreground)"
+                    strokeDasharray="4 4"
+                    label={{ value: t("longTerm.goalLine"), position: "insideTopLeft", fontSize: 10, fill: "var(--muted-foreground)" }}
+                  />
+                )}
+                <Line type="monotone" dataKey="monthly" stroke="var(--color-monthly)" dot={false} strokeWidth={2} />
+              </LineChart>
+            </ChartContainer>
+            <p className="text-muted-foreground mt-1 text-xs">
+              {t("longTerm.hint", {
+                yield: fmtPct(longTerm.yieldUsed),
+                growth: fmtPct(data.settings.dividendGrowthPct / 100),
+                contribution: fmtMoney0(data.settings.monthlyContribution),
+                reinvest: data.settings.reinvest ? t("longTerm.reinvestOn") : t("longTerm.reinvestOff"),
+              })}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <MonthGrid assets={data.assets} received={received} colorOf={colorOf} now={now} locale={locale} hidden={hidden} fmtMoney={fmtMoney} />
 
       <Card>
         <CardHeader>
@@ -265,6 +407,44 @@ export function CalendarView({ data, hidden }: Props) {
               </tr>
             </tbody>
           </table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">{t("years.title")}</CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          {yearRows.length === 0 ? (
+            <p className="text-muted-foreground text-sm">{t("years.empty")}</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="text-muted-foreground text-left text-xs">
+                <tr>
+                  <th className="py-1 pr-3">{t("years.year")}</th>
+                  {symbols.map((s) => (
+                    <th key={s} className="py-1 pr-3 text-right">{s}</th>
+                  ))}
+                  <th className="py-1 pr-3 text-right">{t("years.total")}</th>
+                  <th className="py-1 text-right">{t("years.growth")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {yearRows.map((r) => (
+                  <tr key={r.year} className="border-border/50 border-t">
+                    <td className="py-1.5 pr-3 font-medium">{r.year}</td>
+                    {symbols.map((s) => (
+                      <td key={s} className="py-1.5 pr-3 text-right tabular-nums">{r.bySymbol[s] ? fmtMoney(r.bySymbol[s]) : <span className="text-muted-foreground">·</span>}</td>
+                    ))}
+                    <td className="py-1.5 pr-3 text-right font-medium tabular-nums">{fmtMoney(r.total)}</td>
+                    <td className={`py-1.5 text-right ${r.growth == null ? "text-muted-foreground" : r.growth >= 0 ? "text-success" : "text-destructive"}`}>
+                      {r.growth == null ? "—" : `${r.growth >= 0 ? "+" : ""}${(r.growth * 100).toFixed(1)} %`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </CardContent>
       </Card>
 

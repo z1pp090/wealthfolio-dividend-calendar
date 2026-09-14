@@ -9,10 +9,12 @@ import {
   DialogTitle,
   Input,
   Label,
+  Switch,
 } from "@wealthfolio/ui";
 import { useEffect, useState } from "react";
 import type { AssetCalendar } from "../lib/build-calendar";
 import { normalizeSettings, type CalendarSettings } from "../lib/settings";
+import type { NetMode } from "../lib/tax";
 import { EX_TO_PAY_DAYS } from "../lib/projection";
 
 interface Props {
@@ -29,6 +31,10 @@ interface Draft {
   goalMonthly: string;
   homeTaxPct: string;
   creditCapPct: string;
+  netMode: NetMode;
+  monthlyContribution: string;
+  dividendGrowthPct: string;
+  reinvest: boolean;
   assets: Record<string, { payLagDays: string; withholdingPct: string }>;
 }
 
@@ -45,6 +51,10 @@ function toDraft(s: CalendarSettings, assets: AssetCalendar[]): Draft {
     goalMonthly: str(s.goalMonthly),
     homeTaxPct: str(s.homeTaxPct),
     creditCapPct: str(s.creditCapPct),
+    netMode: s.netMode,
+    monthlyContribution: str(s.monthlyContribution),
+    dividendGrowthPct: str(s.dividendGrowthPct),
+    reinvest: s.reinvest,
     assets: {},
   };
   for (const a of assets) {
@@ -71,6 +81,10 @@ function fromDraft(d: Draft, prev: CalendarSettings): CalendarSettings {
     goalMonthly: parse(d.goalMonthly) ?? 0,
     homeTaxPct: parse(d.homeTaxPct) ?? prev.homeTaxPct,
     creditCapPct: parse(d.creditCapPct) ?? prev.creditCapPct,
+    netMode: d.netMode,
+    monthlyContribution: parse(d.monthlyContribution) ?? 0,
+    dividendGrowthPct: parse(d.dividendGrowthPct) ?? prev.dividendGrowthPct,
+    reinvest: d.reinvest,
     assets,
   });
 }
@@ -133,6 +147,53 @@ export function SettingsPanel({ open, onOpenChange, settings, assets, baseCurren
               value={draft.creditCapPct}
               onChange={(e) => setDraft({ ...draft, creditCapPct: e.target.value })}
             />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label>{t("settingsPanel.netMode")}</Label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(["broker", "afterReturn"] as NetMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setDraft({ ...draft, netMode: mode })}
+                className={`rounded-md border p-2 text-left text-sm ${draft.netMode === mode ? "border-primary bg-primary/10" : "border-border"}`}
+              >
+                <div className="font-medium">{t(`settingsPanel.netMode${mode === "broker" ? "Broker" : "AfterReturn"}`)}</div>
+                <div className="text-muted-foreground text-xs">{t(`settingsPanel.netMode${mode === "broker" ? "Broker" : "AfterReturn"}Hint`)}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-2">
+          <h3 className="mb-2 text-sm font-medium">{t("settingsPanel.projection")}</h3>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="dc-contrib">{t("settingsPanel.contribution", { ccy: baseCurrency })}</Label>
+              <Input
+                id="dc-contrib"
+                inputMode="decimal"
+                value={draft.monthlyContribution}
+                onChange={(e) => setDraft({ ...draft, monthlyContribution: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="dc-growth">{t("settingsPanel.growth")}</Label>
+              <Input
+                id="dc-growth"
+                inputMode="decimal"
+                value={draft.dividendGrowthPct}
+                onChange={(e) => setDraft({ ...draft, dividendGrowthPct: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="dc-reinvest">{t("settingsPanel.reinvest")}</Label>
+              <div className="flex h-9 items-center">
+                <Switch id="dc-reinvest" checked={draft.reinvest} onCheckedChange={(v) => setDraft({ ...draft, reinvest: !!v })} />
+              </div>
+            </div>
           </div>
         </div>
 
